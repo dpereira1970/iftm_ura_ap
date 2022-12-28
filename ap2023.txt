@@ -1,0 +1,557 @@
+
+########################   Script Projeto AP   ###########################
+# Interpolacao pelo inverso da distância, idw, potências 1 a 6, splines
+ #Caracter "NC" eh a variavel de doses de P, K ou calcario
+
+
+
+################################ INICIO ##################################
+
+#AJUSTE O CAMINHO DE SUA PASTA ONDE ESTAO SEUS ARQUIVOS
+getwd() # - verificando diretorio
+# ajustar o caminho certo --> exemplo: setwd("C:/Sua pasta R/Mapas")
+setwd("D:/Arquivos do Usuario/User/Documents/... sua pasta R ")
+
+# CARREGANDO PACOTES
+k <- c("data.table", "dplyr","fields", "ggmap", "ggplot2", "gridExtra", "gstat",
+       "irlba", "maptools", "openxlsx", "raster", "readxl", "rgdal", "rgeos",
+       "sf", "sp", "tibble", "tidyr")
+
+install.packages(k) # AVISO: DEMORA ALGUNS MINUTOS
+lapply(k, library, character.only = TRUE)
+
+
+
+
+###################### INICIO ANALISE DESCRITIVA ##########################
+
+# arquivos de entrada -> XLSX ou TXT
+ require(readxl)
+meus_dados <- read_excel("nc.xlsx", sheet = "Plan1")
+# meus_dados=read.table("recomendacao1.txt",h=T)
+
+# Histograma dos valores da variavel#
+windows()
+  par(mfrow=c(1,2))
+  hist(meus_dados$Atual, main="Valores atuais de fósforo", 
+       col= "green",
+       ylab= "Frequência", xlab="P2O5 (kg/ha)"
+  )
+  
+  hist(meus_dados$NC, main="Valores recomendados", 
+       col= "blue",
+       ylab= "Frequência", xlab="P2O5 (kg/ha)"
+  )
+  close.screen(all=TRUE)
+
+  # SALVE OS GRÁFICOS
+  
+dev.off()
+
+P <- meus_dados
+attach(P)
+head(P)
+coordinates(P)= ~x+y
+class(P)
+head(P)
+proj4string(P) <- NA_character_ #
+proj4string(P) <- CRS("+init=epsg:31983") # associar nova CRS UTM 'Sirgas 2000 23S'
+
+#Plot Bubbles
+ require(gridExtra)
+g1 <- ggplot(data = meus_dados, aes(y = y, x = x, size = Atual)) + geom_point(colour="green")
+g2 <- ggplot(data = meus_dados, aes(y = y, x = x, size = NC)) + geom_point(colour="blue")
+grid.arrange(g1,g2)
+
+# SALVE OS GRÁFICOS
+
+dev.off()
+
+###########################################################################
+
+# conferindo o shapefile e o grid de amostragem
+require(sf)
+W_shp <- st_read("area_de_estudo2.shp")
+ggplot(W_shp)+
+  geom_sf(aes(fill = area))+
+  geom_point(data=meus_dados, 
+             aes(x,y, colour = Atual))+
+               labs(title="Grid de Amostragem")
+
+
+# SALVE O MAPA DE GRID DE AMOSTRAGEM
+
+dev.off()
+
+
+################################# INICIO IDW #################################
+
+# pacote rgdal -> leitura do poligono
+require(rgdal)
+W <- readOGR(dsn = "area_de_estudo2.shp")
+require(sf)
+st_crs(W)
+
+# reprojetando CRS da area do seu projeto
+proj4string(W) <- NA_character_ #
+proj4string(W) <- CRS("+init=epsg:31983")
+
+# extensao dos limites dos pontos alinhados ao shapefile
+P@bbox <- W@bbox
+
+### Data analysis ###
+ require(raster)
+ require(gstat)
+ require(sp)
+ require(tibble)
+
+### Leave-one-out validation routine = Validacao Cruzada...! ###
+IDW.out <- vector(length = length(P))
+for (i in 1:6) {
+  for (j in 1:length(P))  {
+    IDW.out[j] <- idw(NC ~ 1, P[-j,], P[j,], idp=i)$var1.pred
+    if (i == 1) { 
+      p.out1 <- IDW.out
+    } else if (i == 2) {
+      p.out2 <- IDW.out
+    } else if  (i == 3) {
+      p.out3 <- IDW.out
+    } else if   (i == 4) {
+      p.out4 <- IDW.out
+    } else if    (i == 5) {
+      p.out5 <- IDW.out
+    } else {
+      p.out6 <- IDW.out
+    }
+  }
+}
+
+### Grafico de dispersao ###
+# dev.off() # limpa memoria de figuras para liberar espaco
+windows()
+par(mfrow=c(3,2))
+
+for (i in 1:6) {
+  if (i == 1) {
+    t1 <- plot(p.out1,P$NC)
+    grid(t1)
+  } else if (i == 2) {
+    t2 <- plot(p.out2,P$NC)
+    grid(t2)
+  } else if  (i == 3) {
+    t3 <- plot(p.out3,P$NC)
+    grid(t3)
+  } else if   (i == 4) {
+    t4 <- plot(p.out4,P$NC)
+    grid(t4)
+  } else if    (i == 5) {
+    t5 <- plot(p.out5,P$NC)
+    grid(t5)
+  } else {
+    t6 <- plot(p.out6,P$NC)
+    grid(t6)
+  }
+}
+close.screen(all=TRUE)
+
+# SALVE OS GRÁFICOS
+
+dev.off()
+
+
+
+
+### Estatisitica dos dados originais ###
+obs <-P$NC
+
+rmse = 0
+p.value = 0
+cor = 1
+sd <-sd(P$NC)
+mean <-mean(P$NC)
+
+
+
+### Estatisticas dos dados interpolados pelo metodo IDW ###
+### Correlacao ###
+
+for (i in 1:6) {
+  if (i == 1) { 
+    res1 <- cor.test(p.out1, obs)
+  } else if (i == 2) {
+    res2 <- cor.test(p.out2, obs)
+  } else if  (i == 3) {
+    res3 <- cor.test(p.out3, obs)
+  } else if   (i == 4) {
+    res4 <- cor.test(p.out4, obs)
+  } else if    (i == 5) {
+    res5 <- cor.test(p.out5, obs)
+  } else {
+    res6 <- cor.test(p.out6, obs)
+  }
+}
+
+### RMSE ###
+
+for (i in 1:6) {
+  if (i == 1) { 
+    rmse1 <- sqrt( sum((p.out1 - P$NC)^2) / length(P)) 
+  } else if (i == 2) {
+    rmse2 <- sqrt( sum((p.out2 - P$NC)^2) / length(P))
+  } else if  (i == 3) {
+    rmse3 <- sqrt( sum((p.out3 - P$NC)^2) / length(P))
+  } else if   (i == 4) {
+    rmse4 <- sqrt( sum((p.out4 - P$NC)^2) / length(P))
+  } else if    (i == 5) {
+    rmse5 <- sqrt( sum((p.out5 - P$NC)^2) / length(P))
+  } else {
+    rmse6 <- sqrt( sum((p.out6 - P$NC)^2) / length(P)) 
+  }
+}
+
+### media ###
+### desvio-padrao ###
+### coeficiente de correlacao ###
+### p.valor ###
+
+for (i in 1:6) {
+  if (i == 1) { 
+    cor1 <- res1$estimate
+    p.value1 <-res1$p.value
+    sd1 <-sd(p.out1)
+    mean1 <-mean(p.out1)
+  } else if (i == 2) {
+    cor2 <- res2$estimate
+    p.value2 <-res2$p.value
+    sd2 <-sd(p.out2)
+    mean2 <-mean(p.out2)
+  } else if  (i == 3) {
+    cor3 <- res3$estimate
+    p.value3 <-res3$p.value
+    sd3 <-sd(p.out3)
+    mean3 <-mean(p.out3)
+  } else if   (i == 4) {
+    cor4 <- res4$estimate
+    p.value4 <-res4$p.value
+    sd4 <-sd(p.out4)
+    mean4 <-mean(p.out4)
+  } else if    (i == 5) {
+    cor5 <- res5$estimate
+    p.value5 <-res5$p.value
+    sd5 <-sd(p.out5)
+    mean5 <-mean(p.out5)
+  } else {
+    cor6 <- res6$estimate
+    p.value6 <-res6$p.value
+    sd6 <-sd(p.out6)
+    mean6 <-mean(p.out6)
+  }
+}
+
+
+
+
+### Criando arquivos com valores interpolados (IDW) x observados (OBS) ###
+
+OBS <-c(sd,mean,cor,rmse,p.value)
+IDW1 <-c(sd1,mean1,cor1,rmse1,p.value1)
+IDW2 <-c(sd2,mean2,cor2,rmse2,p.value2)
+IDW3 <-c(sd3,mean3,cor3,rmse3,p.value3)
+IDW4 <-c(sd4,mean4,cor4,rmse4,p.value4)
+IDW5 <-c(sd5,mean5,cor5,rmse5,p.value5)
+IDW6 <-c(sd6,mean6,cor6,rmse6,p.value6)
+
+### PREPARANDO TABELAS ###
+dados <- data.frame(OBS,IDW1,IDW2,IDW3,IDW4,IDW5,IDW6)
+nomesestatisticas = c("DP","media","R","RMSE","valor-p")
+ require(data.table)
+dados <- data.table(obs = c(OBS),
+                idw1 = c(IDW1),
+                idw2 = c(IDW2),
+                idw3 = c(IDW3),
+                idw4 = c(IDW4),
+                idw5 = c(IDW5),
+                idw6 = c(IDW6)
+                )
+
+is.data.frame(dados)
+dados <- data.frame(dados)
+t(dados) # transversa
+dados <-t(dados)
+colnames(dados) <- c("DP","media","R","RMSE","valor-p")
+dados <- data.frame(dados)
+is.data.frame(dados)
+dados # MOSTRA OS RESULTADOS DO METODO IDW
+
+
+
+
+
+################################# FIM IDW #####################################
+
+
+
+
+
+
+################################ INICIO SPLINES ###############################
+
+# mapa vazio
+# exemplo: area de estudo com 40ha = pixels de 100m^2 --> 4000 pixels
+grd <- as.data.frame(spsample(P, "regular", n=4000))
+names(grd)       <- c("X", "Y")
+coordinates(grd) <- c("X", "Y")
+gridded(grd)     <- TRUE  # Create SpatialPixel object
+fullgrid(grd)    <- TRUE  # Create SpatialGrid object
+proj4string(grd) <- NA_character_ #
+proj4string(grd) <- CRS("+init=epsg:31983")
+
+tps <- Tps(x = meus_dados[, 1:2], Y = meus_dados[, 3])
+
+
+
+############################### Validação Cruzada ! ###########################
+
+p.out <- vector(length = length(P))
+for (i in 1:length(P)) {
+  PO <- read_excel("nc.xlsx", sheet = "Plan1")
+  # PO=read.table("recomendacao1.txt",h=T) 
+  xy <- PO[i, 1:2]
+  PO <- PO[-i,]
+  tps <- Tps(x = PO[, 1:2], Y = PO[, 3])
+  r <- grd
+  p <- raster(r)
+  p <- interpolate(p, tps) # thin = raster surface
+  s <- stack(p)
+  sgdf <- as(s, 'SpatialGridDataFrame')
+  names(sgdf)<-c("var1.pred")
+  # Load only the packages you need, and try calling the extract method
+  # from raster explicitly: raster::
+  p.out[i] <- raster::extract(p,xy) 
+}
+
+p.out<-replace(x = p.out, list = is.na(p.out), values = 0)
+
+
+
+############################### DISPERSÃO ####################################
+
+t=plot(p.out,P$NC)
+grid(t)
+interp7 <-data.frame(p.out,P$NC) # Mostra dados reais x amostrados
+is.data.frame(interp7)
+head(interp7)
+
+# SALVE OS GRÁFICOS
+
+dev.off()
+
+
+
+
+############################# Estatisticas do interpolador ###################
+
+### Correlacao ###
+est <-p.out
+res <- cor.test(est, obs)
+
+### RMSE dos valores estimados ###
+rmse7 <- sqrt( sum((p.out - P$NC)^2) / length(P))
+# Extract the correlation coefficient
+cor7 <- res$estimate
+# Extract the p.value
+p.value7 <-res$p.value
+# Extract desvio-padrao
+sd7 <-sd(p.out)
+# Extract media
+mean7 <-mean(p.out)
+
+Spline <-c(sd7,mean7,cor7,rmse7,p.value7)
+dados7 <-data.frame(OBS,Spline)
+is.data.frame(dados7)
+dados7 <-t(dados7)
+colnames(dados7) <- c("DP","media","R","RMSE","valor-p")
+options(digits = 3) # formata numero de decimais
+
+dados7 # MOSTRA OS RESULTADOS SPLINES
+
+dados # MOSTRA OS RESULTADOS IDW
+
+
+
+
+# Qual o melhor modelo para a variavel em estudo: IDW ou Splines ? 
+
+### EXPORTA RESULTADOS FINAIS ###
+
+dataset_names <- list('Idw' = dados, 'Splines' = dados7)
+write.xlsx(dataset_names, file = 'resultados.xlsx')
+
+
+
+
+
+################################ FIM SPLINES ##################################
+
+
+
+
+
+
+####################### GERANDO MAPAS FINAIS PARA O PRODUTOR ##################
+
+
+
+
+# Rodar o melhor modelo para a variavel em estudo: IDW ou Splines ? 
+
+
+
+
+
+################################ SE IDW ######################################
+
+# mapa vazio
+# exemplo: area de estudo com 40ha = pixels de 100m^2 --> 4000 pixels
+grd              <- as.data.frame(spsample(P, "regular", n=4000))
+names(grd)       <- c("X", "Y")
+coordinates(grd) <- c("X", "Y")
+gridded(grd)     <- TRUE  # Create SpatialPixel object
+fullgrid(grd)    <- TRUE  # Create SpatialGrid object
+proj4string(grd) <- NA_character_ #
+proj4string(grd) <- CRS("+init=epsg:31983")
+
+### Interpolar com valor de potencia de (idp= ?) --> 1 a 6 ###
+  #ALTERAR " N "
+
+P.idw <- gstat::idw(NC ~ 1, P, newdata=grd, idp=N) # <-- "N"
+proj4string(P.idw) <- NA_character_ #
+proj4string(P.idw) <- CRS("+init=epsg:31983")
+
+# Converta para objeto raster, em seguida, corte para o limite da area
+r       <- raster(P.idw) 
+r.m     <- mask(r, W)
+r <- setMinMax(r)
+#ver sistema de referencia de coordenadas
+r@crs
+masked <- mask(x = r, mask = W)
+cropped <- crop(x = masked, y = extent(W))
+
+# APENAS PARA VISUALIZACAO
+plot(cropped)
+
+dev.off()
+
+### SALVANDO O MAPA FORMATO TIF E HISTOGRAMA ###
+
+writeRaster(cropped,
+            filename = "idw_nc.tif", overwrite = TRUE)
+
+# Histograma dos valores interpolados #
+hist(cropped, main="Distribuição dos valores NC interpolados IDW", 
+     col= "orange", 
+     ylab= "Frequência", xlab="P2O5 (kg/ha)"
+)
+
+
+
+   # SALVE O HISTOGRAMA
+
+dev.off()
+
+
+
+################## SALVAR RASTER/SHAPEFILE PARA O TRATOR #####################
+# read raster
+r1<-raster("idw_nc.tif")
+res(r1)
+# r1<-dis/aggregate(r1, fact=3)
+# convert raster to polygon, dissolved neighboring same values
+r1.to.poly<-raster::rasterToPolygons(r1, dissolve = TRUE)
+
+# calcular area por polygon
+#run area calc and add output to attribute table as new column
+r1.to.poly$Area_sqm <- area(r1.to.poly)
+
+########################################################################
+# exportando o shapefile
+# alterar caminho
+
+getwd() # - verificando diretorio
+
+writeOGR(r1.to.poly, dsn = "D:/Arquivos do Usuario/User/Documents/... sua pasta R ",
+         layer = "idw_nc", driver="ESRI Shapefile", overwrite = TRUE)
+
+# Apresentar o shapefile como resultado do projeto, no dia da entrega do trabalho.
+# Aplicar layout de impressao no Qgis.
+
+
+
+
+
+############################### SE SPLINES ####################################
+
+# mapa vazio
+# exemplo: area de estudo com 40ha = pixels de 100m^2 --> 4000 pixels
+grd              <- as.data.frame(spsample(P, "regular", n=4000))
+names(grd)       <- c("X", "Y")
+coordinates(grd) <- c("X", "Y")
+gridded(grd)     <- TRUE  # Create SpatialPixel object
+fullgrid(grd)    <- TRUE  # Create SpatialGrid object
+proj4string(grd) <- NA_character_ #
+proj4string(grd) <- CRS("+init=epsg:31983")
+ 
+r <- grd
+p <- raster(r)
+p <- interpolate(p, tps) # thin = raster surface
+s <- stack(p)
+
+### SALVANDO O MAPA FORMATO TIF E HISTOGRAMA ###
+
+s <- setMinMax(s)
+masked <- mask(x = s, mask = W) # Clip the raster to boundary area
+cropped <- crop(x = masked, y = extent(W))
+
+   # APENAS PARA VISUALIZACAO
+plot(cropped)
+
+dev.off()
+
+# salva raster na sua pasta
+raster::writeRaster(cropped,
+                    filename = "splines_nc.tif", overwrite = TRUE)
+
+# Histograma dos valores interpolados #
+hist(cropped, main="Distribuição dos valores NC interpolados Splines", 
+     col= "orange", 
+     ylab= "Frequência", xlab="P2O5 (kg/ha)"
+)
+ 
+
+
+
+
+
+################## SALVAR RASTER/SHAPEFILE PARA O TRATOR #####################
+
+# vetorizando o raster
+
+r2<-raster("splines_nc.tif")
+res(r2)
+r2.to.poly<-raster::rasterToPolygons(r2, dissolve = TRUE)
+# calcular area por polygon
+#run area calc and add output to attribute table as new column
+r2.to.poly$Area_sqm <- area(r2.to.poly)
+
+
+# export shapefile
+# alterar caminho
+getwd() # - verificando diretorio
+
+writeOGR(r2.to.poly, dsn = "D:/Arquivos do Usuario/User/Documents... sua pasta R ",
+         layer = "splines_nc", driver="ESRI Shapefile", overwrite = TRUE)
+
+# Apresentar o shapefile como resultado do projeto, no dia da entrega do trabalho.
+# Aplicar layout de impressao no Qgis.
+
+################################## FIM #######################################
